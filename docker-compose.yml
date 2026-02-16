@@ -1,0 +1,17 @@
+services:
+  shutdown-manager:
+    build: .
+    container_name: esxi-shutdown-manager
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./ssh:/app/ssh:ro
+    environment:
+      - ESXI_HOST=${ESXI_HOST:-esxi.local}
+      - ESXI_USER=${ESXI_USER:-root}
+      - ESXI_KEY_PATH=/app/ssh/id_rsa
+      - DB_PATH=/app/data/shutdown_manager.db
+      - TZ=${TZ:-America/Los_Angeles}
+      - SHUTDOWN_WAIT=${SHUTDOWN_WAIT:-180}

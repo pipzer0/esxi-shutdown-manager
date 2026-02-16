@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESXi Shutdown Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: #0f172a; }
+        .card { background: #1e293b; border: 1px solid #334155; }
+        .badge-on { background: #065f46; color: #6ee7b7; }
+        .badge-off { background: #7f1d1d; color: #fca5a5; }
+    </style>
+</head>
+<body class="text-gray-200 min-h-screen">
+    <div class="max-w-6xl mx-auto px-4 py-8">
+        <!-- Header -->
+        <div class="flex items-center justify-between mb-8">
+            <div>
+                <h1 class="text-3xl font-bold text-white">ESXi Shutdown Manager</h1>
+                <p id="host-name" class="text-gray-400 mt-1"></p>
+            </div>
+            <div class="flex items-center gap-3">
+                <span id="connection-status" class="text-sm text-gray-500">Checking...</span>
+                <button onclick="skipTonight()" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg text-sm font-medium transition">
+                    Skip Tonight
+                </button>
+                <button onclick="confirmShutdown()" class="px-4 py-2 bg-red-600 hover:bg-red-500 rounded-lg text-sm font-medium transition">
+                    Shut Down Now
+                </button>
+            </div>
+        </div>
+
+        <!-- Next Shutdown Banner -->
+        <div id="next-shutdown" class="card rounded-xl p-4 mb-6 flex items-center justify-between">
+            <div>
+                <span class="text-gray-400 text-sm">Next scheduled shutdown</span>
+                <p id="next-time" class="text-xl font-semibold text-white mt-1">Loading...</p>
+            </div>
+            <div id="next-skip-btn"></div>
+        </div>
+
+        <!-- Main Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- VMs Panel -->
+            <div class="card rounded-xl p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold text-white">Virtual Machines</h2>
+                    <button onclick="loadVMs()" class="text-sm text-blue-400 hover:text-blue-300">Refresh</button>
+                </div>
+                <div id="vm-list" class="space-y-2">
+                    <p class="text-gray-500">Loading...</p>
+                </div>
+            </div>
+
+            <!-- Schedule Panel -->
+            <div class="card rounded-xl p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold text-white">Weekly Schedule</h2>
+                    <button onclick="saveSchedule()" class="px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded text-sm font-medium transition">
+                        Save
+                    </button>
+                </div>
+                <div id="schedule-form" class="space-y-2"></div>
+            </div>
+        </div>
+
+        <!-- Activity Log -->
+        <div class="card rounded-xl p-6 mt-6">
+            <h2 class="text-lg font-semibold text-white mb-4">Activity Log</h2>
+            <div id="log-list" class="space-y-1 max-h-64 overflow-y-auto font-mono text-sm">
+                <p class="text-gray-500">Loading...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Shutdown Confirm Modal -->
+    <div id="modal" class="fixed inset-0 bg-black/60 flex items-center justify-center hidden z-50">
+        <div class="card rounded-xl p-6 max-w-md w-full mx-4">
+            <h3 class="text-xl font-bold text-white mb-2">Confirm Shutdown</h3>
+            <p class="text-gray-400 mb-6">This will gracefully shut down all VMs and power off the ESXi host. This action cannot be undone remotely.</p>
+            <div class="flex justify-end gap-3">
+                <button onclick="closeModal()" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg text-sm font-medium transition">Cancel</button>
+                <button onclick="doShutdown()" class="px-4 py-2 bg-red-600 hover:bg-red-500 rounded-lg text-sm font-medium transition">Shut Down</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+
+    async function api(path, opts = {}) {
+        const res = await fetch('/api/' + path, {
+            headers: {'Content-Type': 'application/json'},
+            ...opts
+        });
+        return res.json();
+    }
+
+    // --- VMs ---
+    async function loadVMs() {
+        const el = document.getElementById('vm-list');
+        el.innerHTML = '<p class="text-gray-500">Loading...</p>';
+        const data = await api('vms');
+        if (!data.ok) {
+            el.innerHTML = `<p class="text-red-400">Error: ${data.error}</p>`;
+            return;
+        }
+        if (data.vms.length === 0) {
+            el.innerHTML = '<p class="text-gray-500">No VMs found</p>';
+            return;
+        }
+        el.innerHTML = data.vms.map(vm => {
+            const on = vm.state === 'Powered on';
+            return `<div class="flex items-center justify-between py-2 px-3 rounded-lg bg-slate-800/50">
+                <span class="text-sm">${vm.name}</span>
+                <span class="text-xs px-2 py-0.5 rounded-full ${on ? 'badge-on' : 'badge-off'}">${vm.state}</span>
+            </div>`;
+        }).join('');
+    }
+
+    // --- Schedule ---
+    async function loadSchedule() {
+        const data = await api('schedule');
+        if (!data.ok) return;
+        const form = document.getElementById('schedule-form');
+        form.innerHTML = data.schedule.map(s => `
+            <div class="flex items-center gap-3 py-2 px-3 rounded-lg bg-slate-800/50">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" ${s.enabled ? 'checked' : ''} data-dow="${s.day_of_week}" class="sched-enabled rounded">
+                    <span class="text-sm w-24">${s.day_name}</span>
+                </label>
+                <input type="time" value="${String(s.hour).padStart(2,'0')}:${String(s.minute).padStart(2,'0')}"
+                    data-dow="${s.day_of_week}" class="sched-time bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-white">
+            </div>
+        `).join('');
+    }
+
+    async function saveSchedule() {
+        const schedule = [];
+        document.querySelectorAll('.sched-time').forEach(input => {
+            const dow = parseInt(input.dataset.dow);
+            const [h, m] = input.value.split(':').map(Number);
+            const enabled = document.querySelector(`.sched-enabled[data-dow="${dow}"]`).checked;
+            schedule.push({ day_of_week: dow, hour: h, minute: m, enabled });
+        });
+        const data = await api('schedule', {
+            method: 'POST',
+            body: JSON.stringify({ schedule })
+        });
+        if (data.ok) {
+            showToast('Schedule saved');
+            loadNext();
+        }
+    }
+
+    // --- Next Shutdown ---
+    async function loadNext() {
+        const data = await api('next');
+        const el = document.getElementById('next-time');
+        if (data.ok && data.next) {
+            const d = new Date(data.next);
+            el.textContent = `${data.day} at ${data.time}`;
+        } else {
+            el.textContent = 'No shutdown scheduled';
+        }
+    }
+
+    // --- Skip ---
+    async function skipTonight() {
+        const today = new Date().toISOString().split('T')[0];
+        const data = await api('skip', {
+            method: 'POST',
+            body: JSON.stringify({ date: today })
+        });
+        if (data.ok) {
+            showToast('Tonight\'s shutdown skipped');
+            loadNext();
+            loadLogs();
+        }
+    }
+
+    // --- Shutdown ---
+    function confirmShutdown() {
+        document.getElementById('modal').classList.remove('hidden');
+    }
+    function closeModal() {
+        document.getElementById('modal').classList.add('hidden');
+    }
+    async function doShutdown() {
+        closeModal();
+        showToast('Shutdown initiated...');
+        const data = await api('shutdown', { method: 'POST' });
+        if (data.ok) {
+            showToast('Shutdown command sent to ESXi');
+        } else {
+            showToast('Error: ' + data.error, true);
+        }
+        loadLogs();
+    }
+
+    // --- Logs ---
+    async function loadLogs() {
+        const data = await api('logs');
+        const el = document.getElementById('log-list');
+        if (!data.ok || data.logs.length === 0) {
+            el.innerHTML = '<p class="text-gray-500">No activity yet</p>';
+            return;
+        }
+        el.innerHTML = data.logs.map(l => {
+            const colors = {
+                shutdown: 'text-red-400',
+                shutdown_start: 'text-red-400',
+                shutdown_progress: 'text-orange-400',
+                shutdown_complete: 'text-green-400',
+                manual_shutdown: 'text-red-400',
+                skip: 'text-yellow-400',
+                skip_scheduled: 'text-yellow-400',
+                schedule_update: 'text-blue-400',
+                error: 'text-red-500',
+            };
+            const color = colors[l.event] || 'text-gray-400';
+            const ts = l.timestamp.replace('T', ' ').slice(0, 19);
+            return `<div class="flex gap-3">
+                <span class="text-gray-600 shrink-0">${ts}</span>
+                <span class="${color} font-medium shrink-0">${l.event}</span>
+                <span class="text-gray-500 truncate">${l.details || ''}</span>
+            </div>`;
+        }).join('');
+    }
+
+    // --- Connection Test ---
+    async function testConnection() {
+        const el = document.getElementById('connection-status');
+        const data = await api('test');
+        if (data.ok) {
+            el.innerHTML = '<span class="text-green-400">ESXi Connected</span>';
+        } else {
+            el.innerHTML = '<span class="text-red-400">ESXi Disconnected</span>';
+        }
+    }
+
+    // --- Toast ---
+    function showToast(msg, isError = false) {
+        const toast = document.createElement('div');
+        toast.className = `fixed bottom-4 right-4 px-4 py-2 rounded-lg text-sm font-medium z-50 transition-opacity ${isError ? 'bg-red-600' : 'bg-green-600'} text-white`;
+        toast.textContent = msg;
+        document.body.appendChild(toast);
+        setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 3000);
+    }
+
+    // --- Init ---
+    loadVMs();
+    loadSchedule();
+    loadNext();
+    loadLogs();
+    testConnection();
+    setInterval(loadVMs, 60000);
+    setInterval(loadNext, 60000);
+    </script>
+</body>
+</html>
