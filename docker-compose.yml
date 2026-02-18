@@ -9,9 +9,8 @@ services:
       - ./data:/app/data
       - ./ssh:/app/ssh:ro
     environment:
-      - ESXI_HOST=${ESXI_HOST:-esxi.local}
-      - ESXI_USER=${ESXI_USER:-root}
+      - ESXI_HOST=rack1.springfield
+      - ESXI_USER=root
       - ESXI_KEY_PATH=/app/ssh/id_rsa
       - DB_PATH=/app/data/shutdown_manager.db
-      - TZ=${TZ:-America/Los_Angeles}
-      - SHUTDOWN_WAIT=${SHUTDOWN_WAIT:-180}
+      - TZ=America/Los_Angeles

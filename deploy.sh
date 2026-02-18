@@ -9,7 +9,9 @@ echo "=== ESXi Shutdown Manager - Deploy ==="
 # 1) Install Docker if not present
 if ! command -v docker &>/dev/null; then
     echo "[1/4] Installing Docker..."
-    curl -fsSL https://get.docker.com | sudo bash
+    curl -fsSL https://raw.githubusercontent.com/pipzer0/init-docker/main/install_docker_ubuntu.sh -o /tmp/install_docker.sh
+    sudo bash /tmp/install_docker.sh
+    rm /tmp/install_docker.sh
 else
     echo "[1/4] Docker already installed"
 fi
@@ -24,14 +26,11 @@ if [ ! -f ssh/id_rsa ]; then
     echo "  ADD THIS PUBLIC KEY TO YOUR ESXI HOST:"
     echo "============================================"
     echo ""
-    echo "  SSH into your ESXi host and run:"
+    echo "  SSH into rack1.springfield and run:"
     echo ""
     echo "  cat >> /etc/ssh/keys-root/authorized_keys << 'EOF'"
     cat ssh/id_rsa.pub
     echo "EOF"
-    echo ""
-    echo "  Then persist the change:"
-    echo "  /sbin/auto-backup.sh"
     echo ""
     echo "============================================"
     echo ""
@@ -40,22 +39,11 @@ else
     echo "[2/4] SSH key already exists"
 fi
 
-# 3) Create .env if it doesn't exist
-if [ ! -f .env ]; then
-    echo "[3/4] Creating .env file..."
-    cat > .env << 'EOF'
-ESXI_HOST=esxi.local
-ESXI_USER=root
-TZ=America/Los_Angeles
-SHUTDOWN_WAIT=180
-EOF
-    echo "  Edit .env with your ESXi hostname before starting!"
-else
-    echo "[3/4] .env already exists"
-fi
+# 3) Create data directory
+mkdir -p data
+echo "[3/4] Data directory ready"
 
 # 4) Build and start
-mkdir -p data
 echo "[4/4] Building and starting container..."
 docker compose up -d --build
 

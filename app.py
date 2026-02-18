@@ -4,17 +4,16 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from flask import Flask, jsonify, render_template, request
 from zoneinfo import ZoneInfo
 
+PST = ZoneInfo("America/Los_Angeles")
+
+
+def now_pst():
+    return datetime.now(PST)
+from flask import Flask, jsonify, render_template, request
+
 import esxi_client
-
-TZ = ZoneInfo(os.environ.get("TZ", "America/Los_Angeles"))
-
-
-def now_tz():
-    return datetime.now(TZ)
-
 
 app = Flask(__name__)
 DB_PATH = os.environ.get("DB_PATH", "/app/data/shutdown_manager.db")
@@ -61,7 +60,7 @@ def add_log(event, details=None):
     conn = get_db()
     conn.execute(
         "INSERT INTO log (timestamp, event, details) VALUES (?, ?, ?)",
-        (now_tz().isoformat(), event, details),
+        (now_pst().isoformat(), event, details),
     )
     conn.commit()
     conn.close()
@@ -72,7 +71,7 @@ scheduler = BackgroundScheduler()
 
 
 def check_and_shutdown():
-    now = now_tz()
+    now = now_pst()
     conn = get_db()
 
     # Check if today is skipped
@@ -162,7 +161,7 @@ def api_shutdown():
 
 @app.route("/api/skip", methods=["POST"])
 def api_skip():
-    date_str = request.json.get("date", now_tz().strftime("%Y-%m-%d"))
+    date_str = request.json.get("date", now_pst().strftime("%Y-%m-%d"))
     conn = get_db()
     conn.execute("INSERT OR REPLACE INTO skip (date) VALUES (?)", (date_str,))
     conn.commit()
@@ -173,7 +172,7 @@ def api_skip():
 
 @app.route("/api/skip", methods=["DELETE"])
 def api_unskip():
-    date_str = request.json.get("date", now_tz().strftime("%Y-%m-%d"))
+    date_str = request.json.get("date", now_pst().strftime("%Y-%m-%d"))
     conn = get_db()
     conn.execute("DELETE FROM skip WHERE date = ?", (date_str,))
     conn.commit()
@@ -204,7 +203,7 @@ def api_logs():
 @app.route("/api/next")
 def api_next_shutdown():
     conn = get_db()
-    now = now_tz()
+    now = now_pst()
     for i in range(8):
         check_date = now + timedelta(days=i)
         dow = check_date.weekday()
@@ -243,6 +242,6 @@ def api_test():
 
 if __name__ == "__main__":
     init_db()
-    scheduler.add_job(check_and_shutdown, "cron", minute="*", timezone=TZ, id="shutdown_checker")
+    scheduler.add_job(check_and_shutdown, "cron", minute="*", timezone=PST, id="shutdown_checker")
     scheduler.start()
     app.run(host="0.0.0.0", port=8080)

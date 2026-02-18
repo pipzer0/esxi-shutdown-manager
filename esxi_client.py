@@ -4,7 +4,7 @@ import re
 import logging
 import threading
 
-ESXI_HOST = os.environ.get("ESXI_HOST", "esxi.local")
+ESXI_HOST = os.environ.get("ESXI_HOST", "rack1.springfield")
 ESXI_USER = os.environ.get("ESXI_USER", "root")
 ESXI_KEY_PATH = os.environ.get("ESXI_KEY_PATH", "/app/ssh/id_rsa")
 ESXI_PASSWORD = os.environ.get("ESXI_PASSWORD", "")
@@ -77,11 +77,29 @@ def _get_powered_on_vmids():
     return powered_on
 
 
+def _fire_and_forget(cmd):
+    """Send a command over SSH without waiting for output."""
+    client = _connect()
+    try:
+        transport = client.get_transport()
+        channel = transport.open_session()
+        channel.exec_command(cmd)
+        # Don't read output — host will be shutting down
+    finally:
+        # Don't close immediately; give the command a moment to start
+        import time
+        time.sleep(2)
+        client.close()
+
+
 def _do_graceful_shutdown(log_fn=None):
     """Gracefully shut down all VMs, wait, then power off host."""
     def _log(event, details=None):
-        if log_fn:
-            log_fn(event, details)
+        try:
+            if log_fn:
+                log_fn(event, details)
+        except Exception:
+            pass
         log.info(f"{event}: {details}")
 
     try:
@@ -101,7 +119,7 @@ def _do_graceful_shutdown(log_fn=None):
         time.sleep(SHUTDOWN_WAIT)
 
         _log("shutdown_progress", "Powering off ESXi host")
-        _run("/sbin/poweroff", timeout=10)
+        _fire_and_forget("/sbin/poweroff")
 
         _log("shutdown_complete", f"Shut down {len(powered_on)} VMs and powered off host")
     except Exception as e:
