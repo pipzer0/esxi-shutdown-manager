@@ -8,7 +8,7 @@ ESXI_HOST = os.environ.get("ESXI_HOST", "rack1.springfield")
 ESXI_USER = os.environ.get("ESXI_USER", "root")
 ESXI_KEY_PATH = os.environ.get("ESXI_KEY_PATH", "/app/ssh/id_rsa")
 ESXI_PASSWORD = os.environ.get("ESXI_PASSWORD", "")
-SHUTDOWN_WAIT = int(os.environ.get("SHUTDOWN_WAIT", "180"))  # seconds to wait for VMs
+SHUTDOWN_WAIT = int(os.environ.get("SHUTDOWN_WAIT", "240"))  # seconds to wait for VMs
 
 log = logging.getLogger(__name__)
 
