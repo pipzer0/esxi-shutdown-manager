@@ -83,12 +83,10 @@ def _fire_and_forget(cmd):
     try:
         transport = client.get_transport()
         channel = transport.open_session()
-        channel.exec_command(cmd)
-        # Don't read output — host will be shutting down
-    finally:
-        # Don't close immediately; give the command a moment to start
+        channel.exec_command(f"nohup {cmd} >/dev/null 2>&1 &")
         import time
-        time.sleep(2)
+        time.sleep(5)
+    finally:
         client.close()
 
 
@@ -107,6 +105,12 @@ def _do_graceful_shutdown(log_fn=None):
         powered_on = _get_powered_on_vmids()
         _log("shutdown_progress", f"Found {len(powered_on)} powered-on VMs")
 
+        # Schedule the host poweroff ON the ESXi host FIRST, before shutting down VMs.
+        # This app runs as a VM on the ESXi host, so it will die when VMs shut down.
+        # The sleep+poweroff runs as a detached process on ESXi and survives VM shutdown.
+        _log("shutdown_progress", f"Scheduling host poweroff in {SHUTDOWN_WAIT}s on ESXi")
+        _fire_and_forget(f"sh -c 'sleep {SHUTDOWN_WAIT} && /sbin/poweroff'")
+
         for vmid in powered_on:
             try:
                 _run(f"vim-cmd vmsvc/power.shutdown {vmid}")
@@ -114,14 +118,7 @@ def _do_graceful_shutdown(log_fn=None):
             except Exception as e:
                 _log("error", f"Failed to shut down VM {vmid}: {e}")
 
-        import time
-        _log("shutdown_progress", f"Waiting {SHUTDOWN_WAIT}s for VMs to power off")
-        time.sleep(SHUTDOWN_WAIT)
-
-        _log("shutdown_progress", "Powering off ESXi host")
-        _fire_and_forget("/sbin/poweroff")
-
-        _log("shutdown_complete", f"Shut down {len(powered_on)} VMs and powered off host")
+        _log("shutdown_complete", f"Shut down {len(powered_on)} VMs, host will power off in ~{SHUTDOWN_WAIT}s")
     except Exception as e:
         _log("error", f"Shutdown failed: {e}")
 
